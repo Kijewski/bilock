@@ -65,6 +65,17 @@ jobs:
         env:
           MIRIFLAGS: '-Zmiri-backtrace=full -Zmiri-ignore-leaks'
 
+  DryRun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --list
+      - run: cargo publish --dry-run
+
   Docs:
     runs-on: ubuntu-latest
     steps:

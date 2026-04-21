@@ -6,11 +6,9 @@ authors = ["René Kijewski <crates.io@k6i.de>"]
 license = "ISC OR MIT OR Apache-2.0"
 rust-version = "1.88.0"
 repository = "https://github.com/Kijewski/bilock"
-description = "A minimal spin-lock based two-handle mutex pair for `no_std` Rust"
-# TODO
-keywords = []
-# TODO
-categories = []
+description = "A minimal spin-lock based two-handle `Arc<Mutex<T>>` replacement"
+keywords = ["concurrency", "mutex", "synchronization", "arc", "no_std"]
+categories = ["data-structures", "rust-patterns", "no-std"]
 
 [package.metadata.docs.rs]
 all-features = true

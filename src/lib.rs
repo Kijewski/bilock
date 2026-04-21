@@ -4,7 +4,7 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! # Bilock: a minimal spin-lock based two-handle mutex pair for `no_std` Rust
+//! # Bilock: a minimal spin-lock based two-handle `Arc<Mutex<T>>` replacement
 //!
 //! [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Kijewski/bilock/ci.yml?branch=main&style=flat-square&logo=github&logoColor=white "GitHub Workflow Status")](https://github.com/Kijewski/bilock/actions/workflows/ci.yml)
 //! [![Crates.io](https://img.shields.io/crates/v/bilock?logo=rust&style=flat-square "Crates.io")](https://crates.io/crates/bilock)
