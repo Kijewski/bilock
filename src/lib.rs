@@ -122,7 +122,7 @@ struct Inner<T> {
 /// let (a, b) = Bilock::new(0);
 /// assert!(Bilock::ptr_eq(&a, &b));
 /// ```
-pub trait BilockLike<T>: private::BilockLike {
+pub trait BilockLike: private::BilockLike {
     /// True if `left` and `right` belong to the same [`Bilock`] pair.
     ///
     /// # Example
@@ -134,7 +134,7 @@ pub trait BilockLike<T>: private::BilockLike {
     /// assert!(Bilock::ptr_eq(&a, &b));
     /// ```
     #[inline]
-    fn ptr_eq(left: &Self, right: &impl BilockLike<T>) -> bool {
+    fn ptr_eq(left: &Self, right: &impl BilockLike) -> bool {
         ptr::addr_eq(left.state(), right.state())
     }
 
@@ -159,9 +159,9 @@ pub trait BilockLike<T>: private::BilockLike {
     }
 }
 
-impl<T> BilockLike<T> for Bilock<T> {}
-impl<T> BilockLike<T> for Guard<'_, T> {}
-impl<T> BilockLike<T> for OwnedGuard<T> {}
+impl<T> BilockLike for Bilock<T> {}
+impl<T> BilockLike for Guard<'_, T> {}
+impl<T> BilockLike for OwnedGuard<T> {}
 
 unsafe impl<T: Send + Sync> Send for Bilock<T> {}
 unsafe impl<T: Send + Sync> Sync for Bilock<T> {}
@@ -172,22 +172,19 @@ unsafe impl<T: Send + Sync> Sync for OwnedGuard<T> {}
 
 impl<T> fmt::Debug for Bilock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ptr = unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() };
-        debug_ptr(f, "Bilock", ptr)
+        debug_ptr(f, "Bilock", self.value())
     }
 }
 
 impl<T> fmt::Debug for Guard<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ptr = unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() };
-        debug_ptr(f, "Guard", ptr)
+        debug_ptr(f, "Guard", self.value())
     }
 }
 
 impl<T> fmt::Debug for OwnedGuard<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ptr = unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() };
-        debug_ptr(f, "OwnedGuard", ptr)
+        debug_ptr(f, "OwnedGuard", self.value())
     }
 }
 
@@ -662,6 +659,7 @@ mod private {
 
     pub trait BilockLike {
         fn state(&self) -> &atomic::AtomicU8;
+        fn value(&self) -> *const ();
     }
 
     impl<T> BilockLike for Bilock<T> {
@@ -669,6 +667,12 @@ mod private {
         fn state(&self) -> &atomic::AtomicU8 {
             // SAFETY: `self.ptr` points to a valid `Inner<T>`.
             unsafe { &(*self.ptr.as_ptr()).state }
+        }
+
+        #[inline]
+        fn value(&self) -> *const () {
+            // SAFETY: `self.ptr` points to a valid `Inner<T>`.
+            unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() }
         }
     }
 
@@ -678,6 +682,12 @@ mod private {
             // SAFETY: `self.ptr` points to a valid `Inner<T>`.
             unsafe { &(*self.ptr.as_ptr()).state }
         }
+
+        #[inline]
+        fn value(&self) -> *const () {
+            // SAFETY: `self.ptr` points to a valid `Inner<T>`.
+            unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() }
+        }
     }
 
     impl<T> BilockLike for OwnedGuard<T> {
@@ -685,6 +695,12 @@ mod private {
         fn state(&self) -> &atomic::AtomicU8 {
             // SAFETY: `self.ptr` points to a valid `Inner<T>`.
             unsafe { &(*self.ptr.as_ptr()).state }
+        }
+
+        #[inline]
+        fn value(&self) -> *const () {
+            // SAFETY: `self.ptr` points to a valid `Inner<T>`.
+            unsafe { ptr::addr_of!((*self.ptr.as_ptr()).value).cast() }
         }
     }
 }

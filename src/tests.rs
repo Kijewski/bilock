@@ -6,7 +6,14 @@ use core::time::Duration;
 use std::sync::{Barrier, BarrierWaitResult};
 use std::thread::{sleep, spawn, yield_now};
 
-use crate::{Bilock, OwnedGuard};
+use crate::{Bilock, Guard, OwnedGuard};
+
+#[allow(dead_code)] // it's only there to ensure an assumption
+trait ExpectedToBeUnpin: Unpin {}
+
+impl<T> ExpectedToBeUnpin for Bilock<T> {}
+impl<T> ExpectedToBeUnpin for Guard<'_, T> {}
+impl<T> ExpectedToBeUnpin for OwnedGuard<T> {}
 
 #[test]
 fn new_returns_two_handles() {
@@ -191,6 +198,19 @@ fn owned_guard_drop_releases_lock() {
     let _owned = left.owned_lock();
 
     assert!(right.try_lock().is_none());
+}
+
+#[test]
+fn formatting_is_sane() {
+    let (mut left, right) = Bilock::new(0);
+    let owned = left.lock();
+
+    let owned = std::format!("{owned:?}");
+    let right = std::format!("{right:?}");
+    assert_eq!(
+        owned.split_once(' ').unwrap().1,
+        right.split_once(' ').unwrap().1,
+    );
 }
 
 #[test]
