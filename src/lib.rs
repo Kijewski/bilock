@@ -264,10 +264,12 @@ impl<T> Bilock<T> {
     ///
     /// </div>
     #[inline]
-    pub fn owned_lock(self) -> OwnedGuard<T> {
+    pub fn owned_lock(mut self) -> OwnedGuard<T> {
         // SAFETY: `self.lock()` returns a valid `Guard` holding the lock on the same inner pointer,
         // and `self` is forgotten immediately so the original handle is never dropped.
-        unsafe { Guard::into_owned(mem::ManuallyDrop::new(self).lock()) }
+        let guard = unsafe { Guard::into_owned(self.lock()) };
+        mem::forget(self);
+        guard
     }
 
     /// Blocks until the contained value can be acquired.
@@ -516,7 +518,8 @@ impl<T> Bilock<T> {
     #[inline]
     pub unsafe fn into_inner_unchecked(guard: OwnedGuard<T>) -> T {
         // SAFETY: `guard.ptr` points to a valid `Inner<T>`.
-        let inner = unsafe { Box::from_raw(mem::ManuallyDrop::new(guard).ptr.as_ptr()) };
+        let inner = unsafe { Box::from_raw(guard.ptr.as_ptr()) };
+        mem::forget(guard);
         inner.value.into_inner()
     }
 }
@@ -542,9 +545,9 @@ impl<T> Guard<'_, T> {
     /// ```
     #[inline]
     pub unsafe fn into_owned(guard: Guard<'_, T>) -> OwnedGuard<T> {
-        OwnedGuard {
-            ptr: mem::ManuallyDrop::new(guard).ptr,
-        }
+        let owned_guard = OwnedGuard { ptr: guard.ptr };
+        mem::forget(guard);
+        owned_guard
     }
 
     /// Release the lock by dropping the guard explicitly.
@@ -582,11 +585,12 @@ impl<T> OwnedGuard<T> {
     /// ```
     #[inline]
     pub fn unlock(guard: Self) -> Bilock<T> {
-        let guard = mem::ManuallyDrop::new(guard);
         let _: u8 = guard
             .state()
             .fetch_or(UNLOCKED_FLAG, atomic::Ordering::Release);
-        Bilock { ptr: guard.ptr }
+        let bilock = Bilock { ptr: guard.ptr };
+        mem::forget(guard);
+        bilock
     }
 }
 
