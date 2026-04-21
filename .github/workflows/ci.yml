@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "32 4 * * 5"
+
+# let jobs opt-in to permissions explicitly
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Rustfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt -- --check
+
+  Clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-features -- -D warnings
+
+  Test:
+    strategy:
+      matrix:
+        toolchain:
+          - "1.88.0"
+          - stable
+          - nightly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+
+  Miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo miri test --all-features
+        env:
+          MIRIFLAGS: '-Zmiri-backtrace=full -Zmiri-ignore-leaks'
+
+  Docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/install@cargo-docs-rs
+      - run: cargo docs-rs
+
+  Audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  Typos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crate-ci/typos@master
+
+  DevSkim:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: microsoft/DevSkim-Action@v1
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: devskim-results.sarif
+
+  CargoSort:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-sort
+      - run: cargo sort --check --check-format --grouped .
+
+  Readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-readme
+      - run: cargo readme --no-license --no-title --no-indent-headings > README.md
+      - run: git diff --quiet HEAD -- README.md
+
+## FIXME: reinsert once a first release was done
+#
+# PublicApi:
+#   runs-on: ubuntu-latest
+#   steps:
+#     - uses: actions/checkout@v6
+#     - uses: dtolnay/rust-toolchain@nightly
+#     - uses: taiki-e/install-action@v2
+#       with:
+#         tool: cargo-public-api
+#     - uses: Swatinem/rust-cache@v2
+#     - run: cargo public-api
+#     - run: cargo public-api diff
+#
+# SemverChecks:
+#   runs-on: ubuntu-latest
+#   steps:
+#     - uses: actions/checkout@v6
+#     - uses: dtolnay/rust-toolchain@stable
+#     - uses: taiki-e/install-action@v2
+#       with:
+#         tool: cargo-semver-checks
+#     - uses: Swatinem/rust-cache@v2
+#     - run: cargo semver-checks
