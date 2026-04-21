@@ -129,27 +129,25 @@ jobs:
       - run: cargo readme --no-license --no-title --no-indent-headings > README.md
       - run: git diff --quiet HEAD -- README.md
 
-## FIXME: reinsert once a first release was done
-#
-# PublicApi:
-#   runs-on: ubuntu-latest
-#   steps:
-#     - uses: actions/checkout@v6
-#     - uses: dtolnay/rust-toolchain@nightly
-#     - uses: taiki-e/install-action@v2
-#       with:
-#         tool: cargo-public-api
-#     - uses: Swatinem/rust-cache@v2
-#     - run: cargo public-api
-#     - run: cargo public-api diff
-#
-# SemverChecks:
-#   runs-on: ubuntu-latest
-#   steps:
-#     - uses: actions/checkout@v6
-#     - uses: dtolnay/rust-toolchain@stable
-#     - uses: taiki-e/install-action@v2
-#       with:
-#         tool: cargo-semver-checks
-#     - uses: Swatinem/rust-cache@v2
-#     - run: cargo semver-checks
+  PublicApi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo public-api
+      - run: cargo public-api diff
+
+  SemverChecks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo semver-checks
