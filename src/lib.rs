@@ -226,9 +226,7 @@ impl<T> Bilock<T> {
 
         (Self { ptr }, Self { ptr })
     }
-}
 
-impl<T> Bilock<T> {
     /// Consumes `self`, and blocks until the contained value can be acquired.
     ///
     /// # Example
