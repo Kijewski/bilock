@@ -162,6 +162,7 @@ pub trait BilockLike: private::BilockLike {
 impl<T> BilockLike for Bilock<T> {}
 impl<T> BilockLike for Guard<'_, T> {}
 impl<T> BilockLike for OwnedGuard<T> {}
+impl<T: BilockLike> BilockLike for &T {}
 
 unsafe impl<T: Send + Sync> Send for Bilock<T> {}
 unsafe impl<T: Send + Sync> Sync for Bilock<T> {}
@@ -207,24 +208,59 @@ impl<T> Bilock<T> {
     /// ```
     #[inline]
     pub fn new(value: T) -> (Self, Self) {
-        // SAFETY: this is just a placement new
-        let inner = unsafe {
-            let mut inner = Box::<Inner<T>>::new_uninit();
-            ptr::write(
-                &raw mut (*inner.as_mut_ptr()).value,
-                cell::UnsafeCell::new(value),
-            );
-            ptr::write(
-                &raw mut (*inner.as_mut_ptr()).state,
-                atomic::AtomicU8::new(ALIVE_FLAG | UNLOCKED_FLAG),
-            );
-            inner.assume_init()
-        };
-
-        // SAFETY: `Box::into_raw` returns a non-null pointer to a valid `Inner<T>`.
-        let ptr = unsafe { ptr::NonNull::new_unchecked(Box::into_raw(inner)) };
-
+        let ptr = Inner::new(ALIVE_FLAG | UNLOCKED_FLAG).write(value);
         (Self { ptr }, Self { ptr })
+    }
+
+    /// Instantiate an [`OwnedGuard`] and its paired [`Bilock`].
+    ///
+    /// This is a faster implementation than calling [`Bilock::new()`] with a subsequent call to
+    /// [`.lock()`][Bilock::lock].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bilock::{Bilock, OwnedGuard};
+    ///
+    /// let (mut owned, _) = Bilock::new_locked(42);
+    /// assert_eq!(*owned, 42);
+    /// *owned = 43;
+    ///
+    /// let mut handle = OwnedGuard::unlock(owned);
+    /// assert_eq!(*handle.lock(), 43);
+    /// ```
+    #[inline]
+    pub fn new_locked(value: T) -> (OwnedGuard<T>, Bilock<T>) {
+        let ptr = Inner::new(ALIVE_FLAG).write(value);
+        (OwnedGuard { ptr }, Bilock { ptr })
+    }
+
+    /// Crate a new unpaired [`Bilock`].
+    ///
+    /// This function is faster than dropping one member of the [`Bilock::new()`] tuple.
+    /// You can later use [`Bilock::revive()`] to instantiate the other side.
+    /// Most likely [`OwnedGuard::new()`] will be more useful to you.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bilock::{Bilock, OwnedGuard};
+    ///
+    /// let mut owned = OwnedGuard::new(7);
+    /// assert_eq!(*owned, 7);
+    /// *owned = 8;
+    ///
+    /// let mut revived = Bilock::revive(&mut owned).unwrap();
+    ///
+    /// let mut bilock = OwnedGuard::unlock(owned);
+    /// assert_eq!(*revived.lock(), 8);
+    /// assert_eq!(*bilock.lock(), 8);
+    /// ```
+    #[inline]
+    pub fn new_unpaired(value: T) -> Self {
+        Self {
+            ptr: Inner::new(UNLOCKED_FLAG).write(value),
+        }
     }
 
     /// Consumes `self`, and blocks until the contained value can be acquired.
@@ -517,6 +553,66 @@ impl<T> Bilock<T> {
         mem::forget(guard);
         inner.value.into_inner()
     }
+
+    /// "Revives" the other side of the [`Bilock`] pair if the other side was dropped.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bilock::{Bilock, BilockLike};
+    ///
+    /// let (a, b) = Bilock::new(1);
+    /// let mut owned = a.owned_lock();
+    /// drop(b);
+    ///
+    /// let mut revived = Bilock::revive(&mut owned).unwrap();
+    /// assert!(BilockLike::ptr_eq(&owned, &revived));
+    /// drop(owned);
+    /// assert_eq!(*revived.lock(), 1);
+    /// ```
+    ///
+    /// ```
+    /// use bilock::Bilock;
+    ///
+    /// let (a, b) = Bilock::new(1);
+    /// let mut owned = a.owned_lock();
+    /// assert!(Bilock::revive(&mut owned).is_none());
+    /// ```
+    #[inline]
+    pub fn revive(guard: &mut OwnedGuard<T>) -> Option<Self> {
+        let old_state = guard.state().fetch_or(ALIVE_FLAG, atomic::Ordering::AcqRel);
+        if old_state & ALIVE_FLAG != ALIVE_FLAG {
+            Some(Self { ptr: guard.ptr })
+        } else {
+            None
+        }
+    }
+
+    /// "Revives" the other side of the [`Bilock`] pair without checking
+    /// whether the other side has already been dropped.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the paired handle was dropped.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bilock::{Bilock, OwnedGuard};
+    ///
+    /// let (a, b) = Bilock::new(1);
+    /// let mut owned = a.owned_lock();
+    /// drop(b);
+    ///
+    /// let mut revived = unsafe { Bilock::revive_unchecked(&mut owned) };
+    /// drop(owned);
+    /// assert_eq!(*revived.lock(), 1);
+    /// ```
+    #[inline]
+    pub unsafe fn revive_unchecked(guard: &mut OwnedGuard<T>) -> Self {
+        let _: u8 = guard.state().fetch_or(ALIVE_FLAG, atomic::Ordering::AcqRel);
+        Self { ptr: guard.ptr }
+    }
 }
 
 impl<T> Guard<'_, T> {
@@ -566,6 +662,33 @@ impl<T> Guard<'_, T> {
 }
 
 impl<T> OwnedGuard<T> {
+    /// Crate a new [`OwnedGuard`] without a paired [`Bilock`].
+    ///
+    /// You can later use [`Bilock::revive()`] to instantiate the other side.
+    /// Most likely [`Bilock::new_locked()`] will be more useful to you.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bilock::{Bilock, OwnedGuard};
+    ///
+    /// let mut owned = OwnedGuard::new(7);
+    /// assert_eq!(*owned, 7);
+    /// *owned = 8;
+    ///
+    /// let mut revived = Bilock::revive(&mut owned).unwrap();
+    ///
+    /// let mut bilock = OwnedGuard::unlock(owned);
+    /// assert_eq!(*revived.lock(), 8);
+    /// assert_eq!(*bilock.lock(), 8);
+    /// ```
+    #[inline]
+    pub fn new(value: T) -> OwnedGuard<T> {
+        OwnedGuard {
+            ptr: Inner::new(0).write(value),
+        }
+    }
+
     /// Release the lock and return ownership of the original mutex handle.
     ///
     /// # Example
@@ -586,6 +709,27 @@ impl<T> OwnedGuard<T> {
         let bilock = Bilock { ptr: guard.ptr };
         mem::forget(guard);
         bilock
+    }
+}
+
+impl<T> Inner<mem::MaybeUninit<T>> {
+    #[inline]
+    fn new(state: u8) -> Box<Self> {
+        Box::new(Self {
+            value: cell::UnsafeCell::new(mem::MaybeUninit::uninit()),
+            state: atomic::AtomicU8::new(state),
+        })
+    }
+
+    #[inline]
+    fn write(mut self: Box<Self>, value: T) -> ptr::NonNull<Inner<T>> {
+        let _: &mut T = self.value.get_mut().write(value);
+        // SAFETY: we just wrote the value
+        let _: &T = unsafe { self.value.get_mut().assume_init_ref() };
+        // SAFETY: `MaybeUninit<T>` is transparent over `T` and `T` was written
+        let this: Box<Inner<T>> = unsafe { mem::transmute(self) };
+        // SAFETY: `Box::into_raw` returns a non-null pointer
+        unsafe { ptr::NonNull::new_unchecked(Box::into_raw(this)) }
     }
 }
 
@@ -658,6 +802,18 @@ mod private {
     pub trait BilockLike {
         fn state(&self) -> &atomic::AtomicU8;
         fn value(&self) -> *const ();
+    }
+
+    impl<T: BilockLike> BilockLike for &T {
+        #[inline]
+        fn state(&self) -> &atomic::AtomicU8 {
+            T::state(self)
+        }
+
+        #[inline]
+        fn value(&self) -> *const () {
+            T::value(self)
+        }
     }
 
     impl<T> BilockLike for Bilock<T> {
