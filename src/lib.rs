@@ -53,7 +53,7 @@ mod tests;
 
 use alloc::boxed::Box;
 use core::sync::atomic;
-use core::{cell, fmt, hint, marker, mem, ops, ptr};
+use core::{fmt, hint, marker, mem, ops, ptr};
 
 use crate::private::BilockLike as _;
 
@@ -108,7 +108,7 @@ pub struct OwnedGuard<T> {
 }
 
 struct Inner<T> {
-    value: cell::UnsafeCell<T>,
+    value: T,
     state: atomic::AtomicU8,
 }
 
@@ -208,7 +208,7 @@ impl<T> Bilock<T> {
     /// ```
     #[inline]
     pub fn new(value: T) -> (Self, Self) {
-        let ptr = Inner::new(ALIVE_FLAG | UNLOCKED_FLAG).write(value);
+        let ptr = Inner::new(value, ALIVE_FLAG | UNLOCKED_FLAG);
         (Self { ptr }, Self { ptr })
     }
 
@@ -231,7 +231,7 @@ impl<T> Bilock<T> {
     /// ```
     #[inline]
     pub fn new_locked(value: T) -> (OwnedGuard<T>, Bilock<T>) {
-        let ptr = Inner::new(ALIVE_FLAG).write(value);
+        let ptr = Inner::new(value, ALIVE_FLAG);
         (OwnedGuard { ptr }, Bilock { ptr })
     }
 
@@ -259,7 +259,7 @@ impl<T> Bilock<T> {
     #[inline]
     pub fn new_unpaired(value: T) -> Self {
         Self {
-            ptr: Inner::new(UNLOCKED_FLAG).write(value),
+            ptr: Inner::new(value, UNLOCKED_FLAG),
         }
     }
 
@@ -551,7 +551,7 @@ impl<T> Bilock<T> {
         // SAFETY: `guard.ptr` points to a valid `Inner<T>`.
         let inner = unsafe { Box::from_raw(guard.ptr.as_ptr()) };
         mem::forget(guard);
-        inner.value.into_inner()
+        inner.value
     }
 
     /// "Revives" the other side of the [`Bilock`] pair if the other side was dropped.
@@ -685,7 +685,7 @@ impl<T> OwnedGuard<T> {
     #[inline]
     pub fn new(value: T) -> OwnedGuard<T> {
         OwnedGuard {
-            ptr: Inner::new(0).write(value),
+            ptr: Inner::new(value, 0),
         }
     }
 
@@ -712,24 +712,21 @@ impl<T> OwnedGuard<T> {
     }
 }
 
-impl<T> Inner<mem::MaybeUninit<T>> {
+impl<T> Inner<T> {
     #[inline]
-    fn new(state: u8) -> Box<Self> {
-        Box::new(Self {
-            value: cell::UnsafeCell::new(mem::MaybeUninit::uninit()),
-            state: atomic::AtomicU8::new(state),
-        })
-    }
-
-    #[inline]
-    fn write(mut self: Box<Self>, value: T) -> ptr::NonNull<Inner<T>> {
-        let _: &mut T = self.value.get_mut().write(value);
-        // SAFETY: we just wrote the value
-        let _: &T = unsafe { self.value.get_mut().assume_init_ref() };
-        // SAFETY: `MaybeUninit<T>` is transparent over `T` and `T` was written
-        let this: Box<Inner<T>> = unsafe { mem::transmute(self) };
-        // SAFETY: `Box::into_raw` returns a non-null pointer
-        unsafe { ptr::NonNull::new_unchecked(Box::into_raw(this)) }
+    fn new(value: T, state: u8) -> ptr::NonNull<Self> {
+        // SAFETY: this is just a placement new
+        let inner = unsafe {
+            let mut inner = Box::<Inner<T>>::new_uninit();
+            ptr::write(&raw mut (*inner.as_mut_ptr()).value, value);
+            ptr::write(
+                &raw mut (*inner.as_mut_ptr()).state,
+                atomic::AtomicU8::new(state),
+            );
+            inner.assume_init()
+        };
+        // SAFETY: `Box::into_raw` returns a non-null pointer to a valid `Inner<T>`.
+        unsafe { ptr::NonNull::new_unchecked(Box::into_raw(inner)) }
     }
 }
 
@@ -739,7 +736,7 @@ impl<T> ops::Deref for Guard<'_, T> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         // SAFETY: `self.ptr` points to a valid `Inner<T>` and the guard holds the lock.
-        unsafe { &*(*self.ptr.as_ptr()).value.get() }
+        unsafe { &(*self.ptr.as_ptr()).value }
     }
 }
 
@@ -747,7 +744,7 @@ impl<T> ops::DerefMut for Guard<'_, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: `self.ptr` points to a valid `Inner<T>` and the guard holds the lock.
-        unsafe { (*self.ptr.as_ptr()).value.get_mut() }
+        unsafe { &mut (*self.ptr.as_ptr()).value }
     }
 }
 
@@ -757,7 +754,7 @@ impl<T> ops::Deref for OwnedGuard<T> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         // SAFETY: `self.ptr` points to a valid `Inner<T>` and the guard holds the lock.
-        unsafe { &*(*self.ptr.as_ptr()).value.get() }
+        unsafe { &(*self.ptr.as_ptr()).value }
     }
 }
 
@@ -765,7 +762,7 @@ impl<T> ops::DerefMut for OwnedGuard<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: `self.ptr` points to a valid `Inner<T>` and the guard holds the lock.
-        unsafe { (*self.ptr.as_ptr()).value.get_mut() }
+        unsafe { &mut (*self.ptr.as_ptr()).value }
     }
 }
 

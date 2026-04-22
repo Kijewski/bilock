@@ -1,6 +1,6 @@
 [package]
 name = "bilock"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["René Kijewski <crates.io@k6i.de>"]
 license = "ISC OR MIT OR Apache-2.0"
